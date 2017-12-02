@@ -1,12 +1,12 @@
 typealias Board = Array<Array<Int>>
 let initialBoard: Board = [
     [0, 0, 0, 0, 0, 0, 0, 0],
-    [1, 1, 1, 1, 1, 1, 1, 1],
+    [-1, 1, 1, 1, 1, 1, 2, 1],
     [1, 1, 1, 1, 1, 1, 1, 1],
     [0, 0, 0, 0, 0, 0, 0, 0],
     [0, 0, 0, 0, 0, 0, 0, 0],
-    [-1, -1, -1, -1, -1, -1, -1, -1],
-    [-1, -1, -1, -1, -1, -1, -1, -1],
+    [-1, -1, -2, -1, -1, -1, -1, -1],
+    [1, -1, -1, -1, -1, -1, -1, -1],
     [0, 0, 0, 0, 0, 0, 0, 0]
 ]
 
@@ -30,8 +30,9 @@ func printBoard(_ board: Board, with pieces: PieceNames = pieces) -> Void {
     print("   a  b  c  d  e  f  g  h")
 }
 
-enum Player {
-    case white, black
+enum Player: Int {
+    case white = -1
+    case black = 1
 }
 
 // printBoard(initialBoard)
@@ -43,13 +44,19 @@ struct Move {
     let vector: Vector
 }
 
-typealias Rule = (Board, Move) -> MoveValidity
+typealias ValidationRule = (Board, Move) -> MoveValidity
 
 enum MoveValidity: String {
     case valid = "valid move"
     case pieceDoesNotExist = "piece does not exist"
     case notYourPiece = "not your piece"
     case endSquareNotEmpty = "end square is not empty"
+    case onlyOrtogonalNotBack = "only ortogonal move, not back allowed"
+    case cantTakeYourOwnPiece = "cant take your own piece"
+    case noPieceToTake = "no piece to take"
+    case moveTooFar = "move too far"
+    case notOrtogonalMove = "not ortogonal move"
+    case manCantGoBack = "man cant go back"
 }
 
 func pieceExists(_ board: Board, _ move: Move) -> MoveValidity {
@@ -58,9 +65,9 @@ func pieceExists(_ board: Board, _ move: Move) -> MoveValidity {
 
     if piece == 0 {
         return MoveValidity.pieceDoesNotExist
-    } else if move.player == Player.white && piece < 0 {
+    } else if move.player == Player.white && piece > 0 {
         return MoveValidity.notYourPiece
-    } else if move.player == Player.black && piece > 0 {
+    } else if move.player == Player.black && piece < 0 {
         return MoveValidity.notYourPiece
     }
 
@@ -78,14 +85,93 @@ func endSquareIsEmpty(_ board: Board, _ move: Move) -> MoveValidity {
     return MoveValidity.endSquareNotEmpty
 }
 
-typealias Rules = Array<Rule>
+func signum(_ x: Int) -> Int {
+    if x > 0 {
+        return 1
+    } else if x < 0 {
+        return -1
+    }
+    return 0
+}
 
-let rules: Rules = [
+func moveOrtogonal(_ board: Board, _ move: Move) -> MoveValidity {
+    let vector = move.vector
+    let horizontal = vector.to.col - vector.from.col
+    let vertical = vector.to.row - vector.from.row
+    if horizontal != 0 && vertical != 0 {
+        return MoveValidity.notOrtogonalMove
+    }
+
+    if vertical != 0 && horizontal != 0 {
+        return MoveValidity.notOrtogonalMove
+    }
+
+    return MoveValidity.valid
+}
+
+func manCantGoBack(_ board: Board, _ move: Move) -> MoveValidity {
+    let vector = move.vector
+    let piece = board[vector.from.row][vector.from.col]
+
+    if abs(piece) == 2 {
+        return MoveValidity.valid
+    }
+
+    let vertical = vector.to.row - vector.from.row
+
+    if move.player.rawValue == 1 && vertical < 0 {
+        return MoveValidity.manCantGoBack
+    }
+
+    if move.player.rawValue == -1 && vertical > 0 {
+        return MoveValidity.manCantGoBack
+    }
+
+    return MoveValidity.valid
+}
+
+func manMove(_ board: Board, _ move: Move) -> MoveValidity {
+    let vector = move.vector
+    let piece = board[vector.from.row][vector.from.col]
+
+    if abs(piece) != 1 {
+        return MoveValidity.valid
+    }
+
+    let horizontal = vector.to.col - vector.from.col
+    let vertical = vector.to.row - vector.from.row
+    let direction = (signum(vertical), signum(horizontal))
+
+    if abs(horizontal) == 2 || abs(vertical) == 2 {
+        let takingPiece = board[vector.from.row + direction.0][vector.from.col + direction.1]
+        if takingPiece == 0 {
+            return MoveValidity.noPieceToTake
+        } else if signum(takingPiece) == move.player.rawValue {
+            return MoveValidity.cantTakeYourOwnPiece
+        }
+    } else if abs(horizontal) > 2 || abs(vertical) > 2 {
+        return MoveValidity.moveTooFar
+    }
+
+    return MoveValidity.valid
+}
+
+func kingMove(_ board: Board, _ move: Move) -> MoveValidity {
+    return MoveValidity.valid
+}
+
+typealias ValidationRules = Array<ValidationRule>
+
+let validationRules: ValidationRules = [
     pieceExists,
-    endSquareIsEmpty
+    endSquareIsEmpty,
+    moveOrtogonal,
+    manCantGoBack,
+    manMove,
+    kingMove
 ]
 
-func checkValidity(of move: Move, on board: Board, by rules: Rules) -> MoveValidity {
+func checkValidity(of move: Move, on board: Board, by rules: ValidationRules = validationRules) -> MoveValidity {
     for rule in rules {
         let moveValidity = rule(board, move)
 
@@ -97,9 +183,10 @@ func checkValidity(of move: Move, on board: Board, by rules: Rules) -> MoveValid
     return MoveValidity.valid
 }
 
-// print(checkValidity(of: move1, on: initialBoard, by: rules).rawValue)
+typealias ModificationRule = (Board, Move) -> Board
+typealias ModificationRules = Array<ModificationRule>
 
-func apply(_ move: Move, on board: Board) -> Board {
+func movePiece(_ board: Board, _ move: Move) -> Board {
     let from = move.vector.from
     let to = move.vector.to
     let piece = board[from.row][from.col]
@@ -109,6 +196,49 @@ func apply(_ move: Move, on board: Board) -> Board {
     newBoard[to.row][to.col] = piece
 
     return newBoard
+}
+
+func takePiece(_ board: Board, _ move: Move) -> Board {
+    // TODO
+    return board
+}
+
+func changeForKing(_ board: Board, _ move: Move) -> Board {
+    let vector = move.vector
+    let lastRow: Int
+    if move.player == Player.white {
+        lastRow = 0
+    } else {
+        lastRow = 7
+    }
+
+    if vector.to.row != lastRow {
+        return board
+    }
+
+    let piece = board[vector.to.row][vector.to.col]
+
+    if abs(piece) != 1 {
+        return board
+    }
+
+    var newBoard = board
+    newBoard[vector.to.row][vector.to.col] = move.player.rawValue * 2
+    return newBoard
+}
+
+let modificationRules: ModificationRules = [
+    movePiece,
+    takePiece,
+    changeForKing
+]
+
+func apply(_ move: Move, on board: Board, with rules: ModificationRules = modificationRules) -> Board {
+    var board = board
+    for rule in rules {
+        board = rule(board, move)
+    }
+    return board
 }
 
 func translateToVector(from move: String) -> Vector? {
@@ -168,7 +298,7 @@ func translateToVector(from move: String) -> Vector? {
     return Vector(from: (col: fromCol!, row: fromRow), to: (col: toCol!, row: toRow))
 }
 
-func prompt(for player: Player) -> Void {
+func printPrompt(for player: Player) -> Void {
     switch player {
         case .white:
             print("Player1> ", terminator: "")
@@ -196,7 +326,7 @@ func main() -> Void {
     var player = Player.white
 
     while true {
-        prompt(for: player)
+        printPrompt(for: player)
 
         let userInput = readLine()
 
@@ -214,6 +344,12 @@ func main() -> Void {
         if move == nil {
             print("?")
             continue
+        }
+
+        let validity = checkValidity(of: move!, on: board)
+        if validity != MoveValidity.valid {
+            print(validity.rawValue)
+            continue;
         }
 
         board = apply(move!, on: board)
